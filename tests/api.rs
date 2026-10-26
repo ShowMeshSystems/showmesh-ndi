@@ -150,6 +150,16 @@ async fn rejects_bad_requests() {
     assert_eq!(status, StatusCode::OK);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_the_web_ui() {
+    let b = bench("ui");
+    let res = b.app.clone().oneshot(Request::get("/").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res.headers()["content-type"].to_str().unwrap().starts_with("text/html"));
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    assert!(String::from_utf8_lossy(&body).contains("/api/v1/outputs"));
+}
+
 #[test]
 fn openapi_describes_every_route() {
     for path in [
