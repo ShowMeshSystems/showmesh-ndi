@@ -72,6 +72,10 @@ showmesh-ndi play --output HDMI-A-1 --ndi-name "ARENA-MAC (Arena - Projector 1)"
 
 `examples/ndi_test_sender.rs` sends a moving test pattern as an NDI source, for testing without Resolume: `cargo run --release --example ndi_test_sender -- "Bench Sender" 1920x1080@60`.
 
+## Web control page
+
+Open `http://<receiver>:8790/` in a browser on the show network. Each output shows its state, frame rate, and dropped frames, refreshed every 2 seconds. Pick a discovered NDI source, an address, or a test pattern, and a display mode, then press **Take**. **Clear** removes the source and the output goes black. **Start**, **Stop** and **Restart** act on that output only. Nothing changes on the output until you press a button.
+
 ## REST API
 
 The API listens on port 8790. The full description is [api/openapi.yaml](api/openapi.yaml), also served at `/api/v1/openapi.yaml`.

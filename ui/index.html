@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NDI Receiver</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0e1013; --panel: #171a1f; --line: #2a2f37; --text: #e6e8eb; --dim: #8b929c;
+    --ok: #2fb36b; --warn: #e0a42b; --bad: #e0503f; --idle: #5b6470; --accent: #3d8bfd;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; white-space: nowrap; }
+  header .meta { color: var(--dim); font-size: 13px; }
+  header .conn { margin-left: auto; font-size: 13px; }
+  main { padding: 16px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .banner { margin: 16px 16px 0; padding: 10px 12px; border-radius: 6px; background: #3a2a10; color: #f3d69b; font-size: 14px; }
+  .banner:empty { display: none; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 10px; }
+  .top { display: flex; align-items: center; gap: 10px; }
+  .name { font-weight: 600; font-size: 17px; }
+  .badge { margin-left: auto; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--idle); color: #fff; }
+  .badge.playing { background: var(--ok); }
+  .badge.connecting, .badge.reconnecting, .badge.waiting_for_output { background: var(--warn); color: #111; }
+  .badge.error { background: var(--bad); }
+  .msg { color: var(--dim); font-size: 13px; min-height: 1.2em; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 12px; color: var(--dim); }
+  .stats b { display: block; color: var(--text); font-size: 16px; font-variant-numeric: tabular-nums; }
+  label { font-size: 12px; color: var(--dim); display: grid; gap: 4px; }
+  select, input, button { font: inherit; color: var(--text); background: #0f1216; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  select, input { width: 100%; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button { cursor: pointer; background: #222832; }
+  button:hover { border-color: var(--dim); }
+  button.take { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.stop { color: #ffb3aa; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hidden { display: none; }
+  .err { color: var(--bad); font-size: 13px; }
+  .err:empty { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="devname">NDI Receiver</h1>
+  <span class="meta" id="devmeta"></span>
+  <span class="conn" id="conn"></span>
+</header>
+<div class="banner" id="banner"></div>
+<main id="outputs"></main>
+
+<template id="card">
+  <section class="card">
+    <div class="top"><span class="name"></span><span class="badge"></span></div>
+    <div class="msg"></div>
+    <div class="stats">
+      <div><b data-k="fps">-</b>fps</div>
+      <div><b data-k="video">-</b>video</div>
+      <div><b data-k="dropped">-</b>dropped</div>
+      <div><b data-k="restarts">-</b>restarts</div>
+    </div>
+    <label>Source
+      <select class="source"></select>
+    </label>
+    <input class="address hidden" placeholder="host:port, for example 192.168.1.50:5961">
+    <label>Mode
+      <select class="mode"></select>
+    </label>
+    <div class="row">
+      <button class="take">Take</button>
+      <button class="clear">Clear</button>
+    </div>
+    <div class="row">
+      <button class="start">Start</button>
+      <button class="stop">Stop</button>
+      <button class="restart">Restart</button>
+    </div>
+    <div class="err"></div>
+  </section>
+</template>
+
+<script>
+const PATTERNS = ["smpte", "bar", "checkers-8", "black", "white", "red", "green", "blue", "ball"];
+const STATE_LABEL = {
+  idle: "No source", stopped: "Stopped", waiting_for_output: "No display", connecting: "Connecting",
+  playing: "Playing", reconnecting: "Reconnecting", error: "Error",
+};
+const cards = new Map();
+let sources = [];
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method, headers: body ? { "content-type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed with status ${res.status}.`);
+  return data;
+}
+
+function sourceKey(s) {
+  if (!s) return "none";
+  if (s.type === "test_pattern") return "pattern:" + s.pattern;
+  if (s.name) return "ndi:" + s.name;
+  return "address";
+}
+
+function sourceFromKey(key, address) {
+  if (key === "none") return null;
+  if (key.startsWith("pattern:")) return { type: "test_pattern", pattern: key.slice(8) };
+  if (key.startsWith("ndi:")) return { type: "ndi", name: key.slice(4) };
+  return { type: "ndi", address: address.trim() };
+}
+
+function fillSources(select, current) {
+  const opts = [["none", "None (black)"]];
+  const names = sources.map(s => s.name);
+  for (const n of names) opts.push(["ndi:" + n, n]);
+  if (current?.type === "ndi" && current.name && !names.includes(current.name))
+    opts.push(["ndi:" + current.name, current.name + " (not seen on network)"]);
+  opts.push(["address", "NDI source by address..."]);
+  for (const p of PATTERNS) opts.push(["pattern:" + p, "Test pattern: " + p]);
+  const sig = JSON.stringify(opts);
+  if (select.dataset.sig === sig) return;
+  const keep = select.value;
+  select.replaceChildren(...opts.map(([v, t]) => new Option(t, v)));
+  select.dataset.sig = sig;
+  if (keep) select.value = keep;
+}
+
+function fillModes(select, out) {
+  const opts = [["", "Display default"], ...out.modes.map(m => [m.name, m.name + (m.preferred ? " (preferred)" : "")])];
+  const sig = JSON.stringify(opts);
+  if (select.dataset.sig === sig) return;
+  select.replaceChildren(...opts.map(([v, t]) => new Option(t, v)));
+  select.dataset.sig = sig;
+}
+
+function makeCard(name) {
+  const el = document.getElementById("card").content.firstElementChild.cloneNode(true);
+  const $ = sel => el.querySelector(sel);
+  const card = { el, $, dirty: false, out: null };
+  $(".name").textContent = name;
+  const markDirty = () => { card.dirty = true; $(".address").classList.toggle("hidden", $(".source").value !== "address"); };
+  $(".source").addEventListener("change", markDirty);
+  $(".mode").addEventListener("change", markDirty);
+  $(".address").addEventListener("input", () => { card.dirty = true; });
+  const act = async (fn) => {
+    $(".err").textContent = "";
+    el.querySelectorAll("button").forEach(b => b.disabled = true);
+    try { render(await fn()); card.dirty = false; syncControls(card, true); }
+    catch (e) { $(".err").textContent = e.message; }
+    finally {
+      el.querySelectorAll("button").forEach(b => b.disabled = false);
+      if (card.out) render(card.out);
+    }
+  };
+  const path = "/api/v1/outputs/" + encodeURIComponent(name);
+  $(".take").addEventListener("click", () => act(() => {
+    const key = $(".source").value;
+    if (key === "address" && !$(".address").value.trim()) throw new Error("Enter the sender's address, then press Take.");
+    return api("PATCH", path, { source: sourceFromKey(key, $(".address").value), mode: $(".mode").value || null, enabled: true });
+  }));
+  $(".clear").addEventListener("click", () => act(() => api("DELETE", path + "/source")));
+  $(".start").addEventListener("click", () => act(() => api("POST", path + "/start")));
+  $(".stop").addEventListener("click", () => act(() => api("POST", path + "/stop")));
+  $(".restart").addEventListener("click", () => act(() => api("POST", path + "/restart")));
+  document.getElementById("outputs").append(el);
+  cards.set(name, card);
+  return card;
+}
+
+// Puts the controls back to the saved settings, unless the operator is mid-edit.
+function syncControls(card, force) {
+  const { $, out } = card;
+  fillSources($(".source"), out.config.source);
+  fillModes($(".mode"), out);
+  if (card.dirty && !force) return;
+  const key = sourceKey(out.config.source);
+  $(".source").value = key;
+  $(".address").value = key === "address" ? out.config.source.address : "";
+  $(".address").classList.toggle("hidden", key !== "address");
+  $(".mode").value = out.config.mode || "";
+}
+
+function render(out) {
+  const card = cards.get(out.name) || makeCard(out.name);
+  card.out = out;
+  const { $ } = card;
+  const rx = out.receiver || {};
+  const state = out.connected || rx.state ? (rx.state || "idle") : "waiting_for_output";
+  $(".badge").className = "badge " + state;
+  $(".badge").textContent = STATE_LABEL[state] || state;
+  $(".msg").textContent = rx.message || (rx.output_mode ? "Output mode " + rx.output_mode + "." : "");
+  const set = (k, v) => card.el.querySelector(`[data-k="${k}"]`).textContent = v;
+  set("fps", rx.state === "playing" ? rx.fps.toFixed(1) : "-");
+  set("video", rx.video ? `${rx.video.width}x${rx.video.height}` : "-");
+  set("dropped", rx.frames_dropped ?? "-");
+  set("restarts", rx.restarts ?? "-");
+  $(".start").disabled = out.config.enabled;
+  $(".stop").disabled = !out.config.enabled;
+  syncControls(card, false);
+}
+
+async function poll() {
+  const conn = document.getElementById("conn");
+  try {
+    const [device, outs, disc] = await Promise.all([
+      api("GET", "/api/v1/device"), api("GET", "/api/v1/outputs"), api("GET", "/api/v1/sources"),
+    ]);
+    sources = disc.sources;
+    document.getElementById("devname").textContent = device.name;
+    document.title = device.name + " | NDI Receiver";
+    document.getElementById("devmeta").textContent = `${device.hostname} · v${device.version} · ${device.display_mode}`;
+    document.getElementById("banner").textContent = device.ndi_message || "";
+    const shown = outs.filter(o => o.connected || o.config.source || !o.config.enabled);
+    for (const o of shown) render(o);
+    for (const [name, card] of cards)
+      if (!shown.some(o => o.name === name)) { card.el.remove(); cards.delete(name); }
+    conn.textContent = `${sources.length} NDI source${sources.length === 1 ? "" : "s"} visible`;
+    conn.style.color = "";
+  } catch (e) {
+    conn.textContent = "Receiver not responding. Retrying.";
+    conn.style.color = "var(--bad)";
+  }
+}
+
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

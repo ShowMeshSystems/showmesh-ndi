@@ -13,6 +13,7 @@ use crate::manager::{ApiError, Manager, OutputView};
 use crate::receiver::State as RxState;
 
 pub const OPENAPI: &str = include_str!("../api/openapi.yaml");
+const UI: &str = include_str!("../ui/index.html");
 
 pub fn router(manager: Arc<Manager>) -> Router {
     Router::new()
@@ -27,6 +28,7 @@ pub fn router(manager: Arc<Manager>) -> Router {
         .route("/api/v1/outputs/{name}/stop", post(stop))
         .route("/api/v1/outputs/{name}/restart", post(restart))
         .route("/api/v1/openapi.yaml", get(openapi))
+        .route("/", get(ui))
         .with_state(manager)
 }
 
@@ -221,4 +223,8 @@ async fn restart(State(m): AppState, Path(name): Path<String>) -> Result<Json<Ou
 
 async fn openapi() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI)
+}
+
+async fn ui() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], UI)
 }
