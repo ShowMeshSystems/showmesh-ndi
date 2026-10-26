@@ -1,0 +1,31 @@
+# showmesh-ndi configuration. The service rewrites this file when the REST API
+# changes a setting, so comments here are not preserved.
+
+[device]
+name = "ndi-rx-01"
+
+[api]
+listen = "0.0.0.0:8790"
+
+[display]
+# kms: direct DRM/KMS output with no desktop (default).
+# wayland: fullscreen window on a running Wayland desktop, one output only.
+# fake: discard frames, for tests.
+sink = "kms"
+# card = "/dev/dri/card1"
+
+[ndi]
+# How long a lost source holds its last frame before the output goes black
+# and the receiver reconnects.
+timeout_ms = 5000
+
+[[output]]
+connector = "HDMI-A-1"
+mode = "1920x1080@60"
+source = { type = "ndi", name = "ARENA-MAC (Arena - Projector 1)" }
+
+[[output]]
+connector = "HDMI-A-2"
+# address is host:port, for networks where NDI discovery does not reach.
+# source = { type = "ndi", address = "192.168.1.50:5961" }
+source = { type = "test_pattern", pattern = "smpte" }

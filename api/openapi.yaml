@@ -1,0 +1,349 @@
+openapi: 3.1.0
+info:
+  title: showmesh-ndi
+  version: 0.1.0
+  summary: Local REST API of a headless NDI receiver.
+  description: |
+    Each physical display output has one receiver that plays one NDI source
+    fullscreen. Configuration changes are saved to disk and survive a restart.
+    The API has no authentication; it is meant for a dedicated show network.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+security: []
+servers:
+  - url: http://{host}:8790
+    variables:
+      host:
+        default: localhost
+paths:
+  /api/v1/device:
+    get:
+      summary: Device identity, software version and NDI runtime state
+      operationId: getDevice
+      responses:
+        "200":
+          description: Device information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+    patch:
+      summary: Change basic device settings
+      operationId: patchDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Updated device information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "422": { $ref: "#/components/responses/Invalid" }
+  /api/v1/health:
+    get:
+      summary: Overall and per-output health
+      description: |
+        `status` is `degraded` when any output with a source assigned is not
+        playing and was not stopped on purpose. Outputs that are disconnected
+        and have no source are left out.
+      operationId: getHealth
+      responses:
+        "200":
+          description: Health report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, outputs]
+                properties:
+                  status: { type: string, enum: [ok, degraded] }
+                  outputs:
+                    type: array
+                    items:
+                      allOf:
+                        - type: object
+                          required: [name, connected]
+                          properties:
+                            name: { type: string }
+                            connected: { type: boolean }
+                        - $ref: "#/components/schemas/ReceiverStatus"
+  /api/v1/sources:
+    get:
+      summary: NDI sources currently visible on the network
+      operationId: listSources
+      responses:
+        "200":
+          description: Discovery state and sources
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Discovery" }
+  /api/v1/config:
+    get:
+      summary: The saved configuration
+      operationId: getConfig
+      responses:
+        "200":
+          description: Configuration as stored on disk
+          content:
+            application/json:
+              schema: { type: object }
+  /api/v1/outputs:
+    get:
+      summary: Physical outputs, their modes, assignments and receiver state
+      operationId: listOutputs
+      responses:
+        "200":
+          description: All outputs on the display card plus configured outputs that are absent
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Output" }
+  /api/v1/outputs/{name}:
+    parameters:
+      - $ref: "#/components/parameters/OutputName"
+    get:
+      summary: One output
+      operationId: getOutput
+      responses:
+        "200":
+          description: The output
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Output" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      summary: Change an output's source, mode or enabled state
+      description: |
+        Omitted fields are left unchanged. `mode: null` returns to the
+        display's preferred mode and `source: null` removes the source. The
+        output's receiver restarts with the new settings.
+      operationId: patchOutput
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                enabled: { type: boolean }
+                mode: { type: [string, "null"], examples: ["1920x1080@60"] }
+                source:
+                  oneOf:
+                    - $ref: "#/components/schemas/Source"
+                    - type: "null"
+      responses:
+        "200":
+          description: The updated output
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Output" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+  /api/v1/outputs/{name}/source:
+    parameters:
+      - $ref: "#/components/parameters/OutputName"
+    put:
+      summary: Assign a source to an output
+      operationId: putOutputSource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Source" }
+      responses:
+        "200":
+          description: The updated output
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Output" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+    delete:
+      summary: Remove an output's source. The output shows black.
+      operationId: deleteOutputSource
+      responses:
+        "200":
+          description: The updated output
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Output" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/outputs/{name}/start:
+    parameters:
+      - $ref: "#/components/parameters/OutputName"
+    post:
+      summary: Enable the output's receiver. Saved.
+      operationId: startOutput
+      responses:
+        "200": { $ref: "#/components/responses/OutputResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/outputs/{name}/stop:
+    parameters:
+      - $ref: "#/components/parameters/OutputName"
+    post:
+      summary: Disable the output's receiver. The output shows black. Saved.
+      operationId: stopOutput
+      responses:
+        "200": { $ref: "#/components/responses/OutputResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/outputs/{name}/restart:
+    parameters:
+      - $ref: "#/components/parameters/OutputName"
+    post:
+      summary: Tear down and rebuild the output's receiver pipeline
+      operationId: restartOutput
+      responses:
+        "200": { $ref: "#/components/responses/OutputResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/openapi.yaml:
+    get:
+      summary: This document
+      operationId: getOpenApi
+      responses:
+        "200":
+          description: OpenAPI document
+          content:
+            application/yaml: {}
+components:
+  parameters:
+    OutputName:
+      name: name
+      in: path
+      required: true
+      description: DRM connector name, such as `HDMI-A-1`
+      schema: { type: string }
+  responses:
+    OutputResult:
+      description: The output after the change
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Output" }
+    NotFound:
+      description: No output with that name
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Invalid:
+      description: The request was understood but its values are not usable
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, description: Plain-language message that can be shown to an operator }
+    Device:
+      type: object
+      required: [name, software, version, hostname, display_mode, uptime_s, ndi_discovery]
+      properties:
+        name: { type: string }
+        software: { type: string, const: showmesh-ndi }
+        version: { type: string }
+        hostname: { type: string }
+        display_mode: { type: string, enum: [kms, wayland, fake] }
+        display_card: { type: string, examples: [/dev/dri/card0] }
+        uptime_s: { type: integer }
+        ndi_discovery: { type: boolean, description: True when NDI discovery is running }
+        ndi_message: { type: string, description: Why discovery is not running }
+    Discovery:
+      type: object
+      required: [running, sources]
+      properties:
+        running: { type: boolean }
+        message: { type: string }
+        sources:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string, examples: ["ARENA-MAC (Arena - Projector 1)"] }
+              address: { type: string, examples: ["192.168.1.50:5961"] }
+    Source:
+      oneOf:
+        - type: object
+          title: NDI source
+          description: Needs `name`, `address`, or both.
+          required: [type]
+          additionalProperties: false
+          properties:
+            type: { const: ndi }
+            name: { type: string }
+            address: { type: string, description: "host:port, for networks where discovery does not reach" }
+        - type: object
+          title: Test pattern
+          required: [type]
+          additionalProperties: false
+          properties:
+            type: { const: test_pattern }
+            pattern:
+              type: string
+              default: smpte
+              enum: [smpte, smpte100, bar, checkers-1, checkers-8, black, white, red, green, blue, ball]
+    Mode:
+      type: object
+      required: [name, width, height, refresh, preferred]
+      properties:
+        name: { type: string, examples: ["1920x1080@60"] }
+        width: { type: integer }
+        height: { type: integer }
+        refresh: { type: integer }
+        preferred: { type: boolean }
+    OutputConfig:
+      type: object
+      required: [connector, enabled]
+      properties:
+        connector: { type: string }
+        enabled: { type: boolean }
+        mode: { type: string }
+        source: { $ref: "#/components/schemas/Source" }
+    Output:
+      type: object
+      required: [name, connected, modes, config]
+      properties:
+        name: { type: string }
+        connected: { type: boolean }
+        modes:
+          type: array
+          items: { $ref: "#/components/schemas/Mode" }
+        physical_size_mm:
+          type: array
+          items: { type: integer }
+          minItems: 2
+          maxItems: 2
+        config: { $ref: "#/components/schemas/OutputConfig" }
+        receiver: { $ref: "#/components/schemas/ReceiverStatus" }
+    ReceiverStatus:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [idle, stopped, waiting_for_output, connecting, playing, reconnecting, error]
+        message: { type: string, description: Plain-language explanation of the state }
+        source: { $ref: "#/components/schemas/Source" }
+        output_mode: { type: string, description: Display mode set on the output }
+        video:
+          type: object
+          description: Format of the video reaching the display
+          properties:
+            width: { type: integer }
+            height: { type: integer }
+            framerate: { type: string, examples: ["60/1"] }
+            format: { type: string, examples: [BGRx] }
+        fps: { type: number, description: "Frames reaching the display per second, over the last second" }
+        frames_received: { type: integer }
+        frames_displayed: { type: integer }
+        frames_dropped: { type: integer, description: Frames discarded because the display could not keep up }
+        last_frame_age_ms: { type: integer }
+        restarts: { type: integer, description: Pipeline restarts since this receiver started }

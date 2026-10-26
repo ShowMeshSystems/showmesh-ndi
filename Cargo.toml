@@ -1,0 +1,29 @@
+[package]
+name = "showmesh-ndi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "Apache-2.0"
+description = "Headless Linux NDI receiver that plays NDI sources fullscreen on physical display outputs"
+repository = "https://github.com/ShowMeshSystems/showmesh-ndi"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+drm = "0.15"
+gst = { package = "gstreamer", version = "0.25" }
+gst-plugin-ndi = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[profile.release]
+lto = "thin"

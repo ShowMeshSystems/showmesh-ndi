@@ -1,0 +1,27 @@
+[Unit]
+Description=ShowMesh NDI receiver
+Documentation=https://github.com/ShowMeshSystems/showmesh-ndi
+Wants=network-online.target avahi-daemon.service
+After=network-online.target avahi-daemon.service systemd-logind.service
+
+[Service]
+Type=simple
+User=showmesh-ndi
+Group=showmesh-ndi
+SupplementaryGroups=video render
+Environment=NDI_RUNTIME_DIR_V6=/usr/local/lib
+Environment=RUST_LOG=info
+ExecStart=/usr/local/bin/showmesh-ndi --config /etc/showmesh-ndi/config.toml serve
+ConfigurationDirectory=showmesh-ndi
+ConfigurationDirectoryMode=0750
+Restart=always
+RestartSec=2
+Nice=-10
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths=/etc/showmesh-ndi
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
